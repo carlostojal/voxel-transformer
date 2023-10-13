@@ -19,7 +19,7 @@ class Shortcut(torch.nn.Module):
 # residual block class
 class ResBlock(torch.nn.Module):
 
-    def __init__(self, in_channels: int, true_in_channels: int, stride: int = 1):
+    def __init__(self, in_channels: int, true_in_channels: int, stride: int = 1, attention_module: torch.nn.Module = None):
         super().__init__()
 
         self.expansion: int = 4
@@ -34,6 +34,8 @@ class ResBlock(torch.nn.Module):
         self.shortcut = Shortcut(in_channels=true_in_channels, out_channels=self.out_channels, stride=stride)
 
         self.sigmoid = torch.nn.Sigmoid()
+        
+        self.attention = attention_module
 
     def forward(self, x: torch.Tensor):
 
@@ -45,6 +47,13 @@ class ResBlock(torch.nn.Module):
 
         # adapt dimensions with a 1x1 conv layer
         residual = self.shortcut(residual)
+
+        # if an attention module was set
+        if self.attention != None:
+            # compute attention
+            x_attn = self.attention(x)
+            # apply attention
+            x *= x_attn
 
         # concatenate the new feature map and the residual connection
         return self.sigmoid(x + residual)
@@ -99,7 +108,7 @@ class BottleneckBlock(torch.nn.Module):
 class ResNet50(RGBDBackbone):
 
     # feature_len is the output feature vector length
-    def __init__(self, out_feature_len: int):
+    def __init__(self, out_feature_len: int, attention_module: torch.nn.Module = None):
         super().__init__()
 
         # the first layer has 4 input channels (RGBD)
@@ -131,7 +140,8 @@ class ResNet50(RGBDBackbone):
                 else:
                     stride = 1
 
-                new_block = ResBlock(input_size, last_output_size, stride)
+                new_block = ResBlock(in_channels=input_size, true_in_channels=last_output_size,
+                                     attention_module=attention_module, stride=stride)
 
                 # save the previous input size
                 last_input_size = input_size
