@@ -1,5 +1,7 @@
 import torch
 from voxel_transformer.backbones.rgbd.rgbd_backbone import RGBDBackbone
+from typing import Type, Union
+from voxel_transformer.backbones.rgbd.attention.abstract_attention import AbstractAttention
 
 # RGBD backbone using the "ResNet 50" architecture - convolutional.
 
@@ -19,7 +21,8 @@ class Shortcut(torch.nn.Module):
 # residual block class
 class ResBlock(torch.nn.Module):
 
-    def __init__(self, in_channels: int, true_in_channels: int, stride: int = 1):
+    def __init__(self, in_channels: int, true_in_channels: int, stride: int,
+                 attention_type: Union[Type[AbstractAttention],None]):
         super().__init__()
 
         self.expansion: int = 4
@@ -35,7 +38,11 @@ class ResBlock(torch.nn.Module):
 
         self.sigmoid = torch.nn.Sigmoid()
 
-    def forward(self, x: torch.Tensor):
+        self.attention = None
+        if attention_type is not None:
+            self.attention = attention_type(self.out_channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         # save the residual value
         residual: torch.Tensor = x
@@ -45,6 +52,15 @@ class ResBlock(torch.nn.Module):
 
         # adapt dimensions with a 1x1 conv layer
         residual = self.shortcut(residual)
+
+        # if an attention module was set
+        if self.attention is not None:
+            # compute attention
+            x_attn = self.attention(x)
+            # rescale the attention
+            x_attn = x_attn.view(x.size(0), -1, 1, 1)
+            # apply attention
+            x *= x_attn
 
         # concatenate the new feature map and the residual connection
         return self.sigmoid(x + residual)
@@ -99,7 +115,7 @@ class BottleneckBlock(torch.nn.Module):
 class ResNet50(RGBDBackbone):
 
     # feature_len is the output feature vector length
-    def __init__(self, out_feature_len: int):
+    def __init__(self, out_feature_len: int, attention_type: Union[Type[AbstractAttention],None] = None):
         super().__init__()
 
         # the first layer has 4 input channels (RGBD)
@@ -131,7 +147,8 @@ class ResNet50(RGBDBackbone):
                 else:
                     stride = 1
 
-                new_block = ResBlock(input_size, last_output_size, stride)
+                new_block = ResBlock(in_channels=input_size, true_in_channels=last_output_size, stride=stride,
+                                     attention_type=attention_type)
 
                 # save the previous input size
                 last_input_size = input_size
